@@ -20,7 +20,7 @@ type statement =
     | If of expr*statement list * statement list
     | While of expr*statement list
     | For of statement*expr*statement*statement list
-    | FctDef of string * expr list * statement list 
+    | FctDef of string * string list * statement list 
 
 (* A block of code that requires its own environment for local variables *)
 type block = statement list 
@@ -29,7 +29,7 @@ type block = statement list
 type env = (string*float) list
 
 (* List of Functions *)
-type fctEnv = (string * expr list * statement list  ) list
+type fctEnv = (string * string list * statement list  ) list
 
 (* Queue of Environments to handle nested functions/recursion*)
 type envQueue = env list
@@ -42,20 +42,31 @@ let printTupleList l = match l with
 
 (* Prints the environment queue *)
 let rec printQueue que = match que with
-    | [] -> ()
-    | h::t -> printTupleList h; printf "\n" ; printQueue t
+    | [] -> printf "Nothing man"; ()
+    | h::t -> printTupleList h; printf "Something\n" ; printQueue t
 
-(* Finds a variable? What does the rec keyword do? It means its Recursive...*)
-let rec find_var var l =
+
+(* Find variable *)
+let rec find_var_tuple_list var l =
     match l with
-            [] -> raise Not_found
-            |(s, i)::tl -> if s = var then i
-                                  else find_var var tl
+            [] -> None
+            |(s, i)::tl -> if s = var then Some i
+                                  else find_var_tuple_list var tl
 
 (* Evaluates a variable *)
-let varEval (_v: string) (_q:envQueue): float  =
+let rec varEval (_v: string) (_q:envQueue): float  =
+    printf "Finding: %s" _v;
+    printQueue _q;
     match List.hd _q with
-    | Some h -> find_var _v h
+    | Some h -> (
+            match find_var_tuple_list _v h with
+                None -> (match List.tl _q with 
+                        | None -> failwith "Not found"
+                        | Some y -> varEval _v y
+                        )
+                | Some x -> x
+        )
+                
     | None -> failwith "Not found Results Variable"
 
 (* Evaluate operators for ++ and -- *)
@@ -77,21 +88,19 @@ let eval_op2 op e1 e2 =
 
 let rec find_fct var p l =
     match l with
-        [] -> raise Not_found
-        |(s, pl, bl)::tl -> if s = var & List.length p = List.length pl then bl
+        [] -> failwith "Not found fct"
+        |(s, pl, bl)::tl -> if s = var & List.length p = List.length pl then (s, pl, bl)
                                 else find_fct var p tl
 
-let rec evalFct (_n:string) (_p: float list) (_f:fctEnv) : block =
-    match List.hd _f with
-    | Some h -> find_fct _n _p _f
-    | None -> failwith "Not found Funcky boi"
+
 
 
 (* Inserts a number at the end?  *)
-let rec insert_at_end l i =
-  match l with
+let insert_at_end l i =
+    [i]@l
+  (*match l with
     [] -> [i]
-  | h :: t -> h :: (insert_at_end t i)
+  | h :: t -> h :: (insert_at_end t i)*)
 
 (* This just finds the head? *)
 let hd l = match List.hd l with
@@ -106,14 +115,16 @@ let decFct f fe =
 
 (* Evaluates a block of code using the environment queue, returns result of the code block. First place the input is sent *)
 let rec evalCode (_code: block) (_q:envQueue) (_f:fctEnv): float = 
+
+    printf "Length of block: %d\n" (List.length _code); 
     let q = [] @ _q in 
-    printQueue q;
+    (*printQueue q;*)
     (* let f = [] @ _f in
     printFunc f; *)
     match _code with 
-    | [] -> 1.2;
+    | [] -> 0.0;
     | h::t -> let out = evalStatement h q _f in
-              let (outf, outq) = out in
+              let (outq, outf) = out in
               evalCode t outq outf
     (* let y = List.fold_left evalStatement  [] in ()*)
     (* let x = evalStatement (hd _code) q in () *)
@@ -125,26 +136,26 @@ let rec evalCode (_code: block) (_q:envQueue) (_f:fctEnv): float =
 (* UwU whats this? a floating and statement?
 It appears to take in a statement and environment queue and creates a new environment for the statement. 
 And allows you to call evalCode and allows evalCode to call evalStatement. Recursively. Mutually recursive types.*)
-and evalStatement (s: statement) (q:envQueue) (f:fctEnv): (fctEnv*envQueue) =
+and evalStatement (s: statement) (q:envQueue) (f:fctEnv): (envQueue*fctEnv) =
     match s with 
         | Assign(_v, _e) -> let out = evalExpr _e q f in
                             let sc = List.hd q in
                             let q = insert_at_end q [(_v, out)]
-                            in (f, q)
+                            in (q, f)
         | If(e, codeT, codeF) -> 
             let cond = evalExpr e q f in
                 if(cond>0.0) then
                     let _ = evalCode codeT q f in
-                    (f,q)
+                    (q,f)
                 else
                     let _ = evalCode codeF q f in
-                    (f, q)
+                    (q, f)
         | Expr e -> let out = evalExpr e q f in
-                printf "%f\n" out; (f, q)
-        | For (s1, e, s2, code) -> (f, q) (* ree *)
+                printf "%f\n" out; (q, f)
+        | For (s1, e, s2, code) -> (q, f) (* ree *)
         | FctDef (n, p, bl) -> let fe = decFct f (n, p, bl) in
-                            (fe, q)
-        | _ -> (f, q) (*ignore *)
+                            (q, fe)
+        | _ -> (q,f) (*ignore *)
 
 (* Evaluates expressions, matching it with an associated type. *)
 and evalExpr (_e: expr) (_q:envQueue) (_f:fctEnv): float  = 
@@ -152,15 +163,37 @@ and evalExpr (_e: expr) (_q:envQueue) (_f:fctEnv): float  =
     | Num n -> n
     | Var v -> varEval v _q
     | Op1 (op, e1) -> (eval_op1 op (evalExpr e1 _q _f))
-    | Op2 (op, e1, e2) -> (eval_op2 op (evalExpr e1 _q _f) (evalExpr e2 _q _f))
-    | Fct (n, p) -> evalCode (evalFct n (evalExprList p [] _q _f) _f) _q _f 
-    | _ -> 1.2
+    | Op2 (op, e1, e2) -> (eval_op2 op 
+                (evalExpr e1 _q _f) 
+                (evalExpr e2 _q _f))
+    | Fct (n, p) -> let (nQ, nF, block) = evalFct n p _q _f in 
+            evalCode block nQ nF
+    | _ -> 1.5
 
 and evalExprList (p: expr list) (r: float list) (_q:envQueue) (_f:fctEnv): float list =
     match p with 
     | [] -> [];
     | h::t -> let e = evalExpr h _q _f in 
+                    printf "Param value: %f\n" e;
                     r@[e]
+
+
+and assign_var_list (param_names: string list) (expr_list: expr list) (_q :envQueue) (_f: fctEnv): (envQueue*fctEnv) =
+    let topq = List.hd _q in
+    match param_names, expr_list with
+    | [], [] -> (_q, _f)
+    | hd1::tl1, hd2::tl2 -> evalStatement (Assign(hd1, hd2)) _q _f
+
+and evalFct (_n:string) (_p: expr list) (_q:envQueue) (_f:fctEnv) : envQueue*fctEnv*block =
+    match List.hd _f with
+    | Some h -> let (name, params, block) = find_fct _n _p _f in 
+        let nQ, nF = assign_var_list params _p _q _f in 
+        (nQ, nF, block)
+    | None -> failwith "Not found Funcky boi"
+
+
+
+
 
 (* Test for expression *)
 let%expect_test "evalNum" = 
@@ -171,7 +204,7 @@ let%expect_test "evalNum" =
 
 (* p999... what a descriptive name. This is a test of the assignment operator. *)
 let p999: statement = Assign("v", Num(1.0))
-let%test _ = evalStatement p999 [] [] = ([], [[("v", 1.0)]])
+(*let%test _ = evalStatement p999 [] [] = ([], [[("v", 1.0)]])*)
 (* 
     v = 10; 
     v // display v
@@ -233,7 +266,7 @@ let%expect_test "p2" =
  *)
 let p3: block = 
     [
-        FctDef("f", [Var("x")], [
+        FctDef("f", ["x"], [
             If(
                 Op2("<", Var("x"), Num(1.0)),
                 [Return(Num(1.0))],
@@ -253,5 +286,22 @@ let%expect_test "p3" =
         5.      
     |}]
 
+
+let p4: block = 
+    [
+        FctDef("f", ["x"; "y"], [
+            Assign("x", Op2("+", Var("x"), Num(1.0)));
+            Assign("y", Op2("*", Var("y"), Num(2.0)))
+        ]);
+        Expr(Fct("f", [Num(1.0); Num(3.0)]))
+    
+    ]
+
+let%expect_test "p4" =
+    let _ = evalCode p4 [] [] in (); 
+    [%expect {| 
+        2. 
+        6.
+    |}]
 
 
