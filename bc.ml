@@ -1,4 +1,7 @@
 open Core
+
+exception ReturnValue of float
+
 (* Input expression or list of expressions *)
 type sExpr = 
     | Atom of string
@@ -38,12 +41,19 @@ type envQueue = env list
 let printTupleList l = match l with
     | [] -> ()
     | h::t -> let (x,y) = h in
-            printf "%s %f, " x y
+            printf "\t%s %f, " x y
 
 (* Prints the environment queue *)
-let rec printQueue que = match que with
-    | [] -> printf "Nothing man"; ()
-    | h::t -> printTupleList h; printf "Something\n" ; printQueue t
+let rec loop_through_que que =
+    printf "\n\t-------\n";
+    match que with
+    | [] -> ()
+    | h::t -> printTupleList h; loop_through_que t
+
+let printQueue que =
+    printf "STACK\n";
+    loop_through_que que;
+    printf "=================\n"
 
 
 (* Find variable *)
@@ -54,20 +64,33 @@ let rec find_var_tuple_list var l =
                                   else find_var_tuple_list var tl
 
 (* Evaluates a variable *)
-let rec varEval (_v: string) (_q:envQueue): float  =
-    printf "Finding: %s" _v;
-    printQueue _q;
+let rec varEval (_v: string) (_q:envQueue) =
     match List.hd _q with
     | Some h -> (
             match find_var_tuple_list _v h with
                 None -> (match List.tl _q with 
-                        | None -> failwith "Not found"
+                        | None -> None
                         | Some y -> varEval _v y
                         )
-                | Some x -> x
+                | Some x -> Some (x)
         )
                 
-    | None -> failwith "Not found Results Variable"
+    | None -> printf "Not found"; None
+
+let rec find_and_replace_var_in_env ls (x:string*float) =
+    let (nname, nvalue) = x in
+    match ls with
+    [] -> ls
+    | (name, value)::t -> if name=nname then (name, nvalue)::(find_and_replace_var_in_env t x) else (name, value)::(find_and_replace_var_in_env t x)
+
+let rec find_and_replace_first_occurence ls (x:string*float) change =
+    if change = false then ls else
+        let (name, value) = x in
+    match ls with
+    | [] -> ls
+    | h::t -> match (find_var_tuple_list name h) with
+        | Some x-> printf "replaced"; (find_and_replace_var_in_env h (name,value)) :: (find_and_replace_first_occurence t (name,value) false)
+        | None -> printf "Not found"; h::(find_and_replace_first_occurence t x true)
 
 (* Evaluate operators for ++ and -- *)
 let eval_op1 op (e1: float): float=
@@ -84,6 +107,7 @@ let eval_op2 op e1 e2 =
   | "*" -> ( *. ) e1 e2
   | "/" -> (/.) e1 e2
   | ">" -> if (e1 > e2) then 1.0 else 0.0
+  | "<" -> if (e1 < e2) then 1.0 else 0.0
   | x -> printf "%s" x; (+.) e1 e2
 
 let rec find_fct var p l =
@@ -105,7 +129,12 @@ let insert_at_end l i =
 (* This just finds the head? *)
 let hd l = match List.hd l with
     | Some x -> x
-    | None -> failwith "oof"
+    | None -> failwith "no head"
+let tl l = match List.tl l with
+    | Some x -> x
+    | None -> failwith "no tail"
+
+
 
 (* Insert into function list *)
 let decFct f fe =
@@ -116,14 +145,12 @@ let decFct f fe =
 (* Evaluates a block of code using the environment queue, returns result of the code block. First place the input is sent *)
 let rec evalCode (_code: block) (_q:envQueue) (_f:fctEnv): float = 
 
-    printf "Length of block: %d\n" (List.length _code); 
-    let q = [] @ _q in 
-    (*printQueue q;*)
+    printQueue _q;
     (* let f = [] @ _f in
     printFunc f; *)
     match _code with 
     | [] -> 0.0;
-    | h::t -> let out = evalStatement h q _f in
+    | h::t -> let out = evalStatement h _q _f in
               let (outq, outf) = out in
               evalCode t outq outf
     (* let y = List.fold_left evalStatement  [] in ()*)
@@ -138,11 +165,16 @@ It appears to take in a statement and environment queue and creates a new enviro
 And allows you to call evalCode and allows evalCode to call evalStatement. Recursively. Mutually recursive types.*)
 and evalStatement (s: statement) (q:envQueue) (f:fctEnv): (envQueue*fctEnv) =
     match s with 
-        | Assign(_v, _e) -> let out = evalExpr _e q f in
-                            let sc = List.hd q in
-                            let q = insert_at_end q [(_v, out)]
-                            in (q, f)
-        | If(e, codeT, codeF) -> 
+        | Assign(_v, _e) -> printf "STATMENT: ASSIGN\n"; let out = evalExpr _e q f in
+                            (
+                                match varEval _v q with
+                                | Some x -> (
+                                    let nq = (find_and_replace_first_occurence q (_v, out) true)
+                                in (nq, f))
+                                | None -> let nenv = insert_at_end (hd q) (_v, out) in
+                                ([nenv]@(tl q), f)
+                            )
+        | If(e, codeT, codeF) -> printf "STATMENT IF\n"; 
             let cond = evalExpr e q f in
                 if(cond>0.0) then
                     let _ = evalCode codeT q f in
@@ -151,32 +183,28 @@ and evalStatement (s: statement) (q:envQueue) (f:fctEnv): (envQueue*fctEnv) =
                     let _ = evalCode codeF q f in
                     (q, f)
         | Expr e -> let out = evalExpr e q f in
-                printf "%f\n" out; (q, f)
-        | For (s1, e, s2, code) -> (q, f) (* ree *)
-        | FctDef (n, p, bl) -> let fe = decFct f (n, p, bl) in
+                printf "Out: %f\n" out; (q, f)
+        | For (s1, e, s2, code) -> printf "STATMENT: IF\n"; (q, f) (* ree *)
+        | FctDef (n, p, bl) -> printf "STATEMENT: FCTDEF\n"; let fe = decFct f (n, p, bl) in
                             (q, fe)
-        | _ -> (q,f) (*ignore *)
+        | Return e -> let out = evalExpr e q f in raise (ReturnValue out)
+        | _ -> printf "STATEMENT: IDK\n"; (q,f) (*ignore *)
 
 (* Evaluates expressions, matching it with an associated type. *)
 and evalExpr (_e: expr) (_q:envQueue) (_f:fctEnv): float  = 
     match _e with
     | Num n -> n
-    | Var v -> varEval v _q
+    | Var v -> (match varEval v _q with 
+                    | Some x -> x
+                    | None -> 0.0
+                )
     | Op1 (op, e1) -> (eval_op1 op (evalExpr e1 _q _f))
     | Op2 (op, e1, e2) -> (eval_op2 op 
                 (evalExpr e1 _q _f) 
                 (evalExpr e2 _q _f))
-    | Fct (n, p) -> let (nQ, nF, block) = evalFct n p _q _f in 
+    | Fct (n, p) ->  let q = [[]] @ _q in let (nQ, nF, block) = evalFct n p q _f in  
             evalCode block nQ nF
     | _ -> 1.5
-
-and evalExprList (p: expr list) (r: float list) (_q:envQueue) (_f:fctEnv): float list =
-    match p with 
-    | [] -> [];
-    | h::t -> let e = evalExpr h _q _f in 
-                    printf "Param value: %f\n" e;
-                    r@[e]
-
 
 and assign_var_list (param_names: string list) (expr_list: expr list) (_q :envQueue) (_f: fctEnv): (envQueue*fctEnv) =
     let topq = List.hd _q in
@@ -290,8 +318,12 @@ let%expect_test "p3" =
 let p4: block = 
     [
         FctDef("f", ["x"; "y"], [
+            Expr(Var("x"));
             Assign("x", Op2("+", Var("x"), Num(1.0)));
-            Assign("y", Op2("*", Var("y"), Num(2.0)))
+            (*Assign("y", Op2("*", Var("y"), Num(2.0)))*)
+
+            Expr(Var("x"));
+            Return(Var("x"));
         ]);
         Expr(Fct("f", [Num(1.0); Num(3.0)]))
     
