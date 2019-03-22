@@ -149,17 +149,16 @@ and print_block b =
 
 
 (* Evaluates a block of code using the environment queue, returns result of the code block. First place the input is sent *)
-let rec evalCode (_code: block) (_q:envQueue) (_f:fctEnv): float = 
+let rec evalCode (_code: block) (_q:envQueue) (_f:fctEnv): envQueue*fctEnv = 
 
         printQueue _q;
     (* let f = [] @ _f in
     printFunc f; *)
     match _code with 
-    | [] -> failwith "fuck"
-    | h::t -> try (let out = evalStatement h _q _f in
+    | [] -> (_q, _f)
+    | h::t -> let out = evalStatement h _q _f in
               let (outq, outf) = out in
-              evalCode t outq outf)
-    with ReturnValue x-> printf "GOT %f\n" x; x
+              evalCode t outq outf
     (* let y = List.fold_left evalStatement  [] in ()*)
     (* let x = evalStatement (hd _code) q in () *)
     (* in let (a, b) = hd (hd x) in *)
@@ -187,13 +186,11 @@ and evalStatement (s: statement) (q:envQueue) (f:fctEnv): (envQueue*fctEnv) =
         | If(e, codeT, codeF) -> printf "STATMENT IF\n"; 
             let cond = evalExpr e q f in
                 if(cond>0.0) then
-                    let out = evalCode codeT q f in
-                    printf "FINISHED IF AND GOT %f" out;
-                    (q,f)
+                    let (nq,nf) = evalCode codeT q f in
+                    (nq,nf)
                 else
-                    let _ = evalCode codeF q f in
-                    printf "FINISHED ELSE\n";
-                    (q, f)
+                    let (nq,nf) = evalCode codeF q f in
+                    (nq, nf)
         | Expr e -> let out = evalExpr e q f in
                 printf "Out: %f\n" out; (q, f)
         | For (s1, e, s2, code) -> printf "STATMENT: IF\n"; (q, f) (* ree *)
@@ -225,7 +222,11 @@ and evalExpr (_e: expr) (_q:envQueue) (_f:fctEnv): float  =
                 (evalExpr e2 _q _f))
     | Fct (n, p) -> printf "Fct"; printf "Doing func\n"; let evaluated_params = eval_expr_to_list p _q _f in
     let q = [[]] @ _q in let (nQ, nF, block) = evalFct n evaluated_params q _f in  
-    let outf = evalCode block nQ nF in printf "FINISHED AND GOT %f" outf; outf
+
+    try (
+        let _ = evalCode block nQ nF in 5.0
+    )
+    with ReturnValue x-> printf "GOT %f\n" x; x
     | _ -> 1.5
 
 and assign_var_list (param_names: string list) (expr_list: float list) (_q :envQueue) (_f: fctEnv): (envQueue*fctEnv) =
@@ -331,7 +332,7 @@ let p3: block =
                     Fct("f", [Op2("-", Var("x"), Num(2.0))])
                 ))])
         ]);
-        Expr(Fct("f", [Num(0.0)]));
+        Expr(Fct("f", [Num(3.0)]));
         (* Expr(Fct("f", [Num(5.0)])); *)
     ]
 
